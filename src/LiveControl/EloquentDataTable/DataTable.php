@@ -4,44 +4,46 @@ namespace LiveControl\EloquentDataTable;
 use Exception;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Connection;
+use Illuminate\Support\Str;
 use Illuminate\Database\Query\Expression as raw;
+use Symfony\Component\HttpFoundation\ParameterBag;
 use LiveControl\EloquentDataTable\VersionTransformers\Version110Transformer;
 use LiveControl\EloquentDataTable\VersionTransformers\VersionTransformerContract;
 
-
 class DataTable
 {
-    private $builder;
-    private $columns;
-    private $formatRowFunction;
+    protected $str;
+    protected $builder;
+    protected $columns;
+    protected $connection;
+    protected $rowFormatter;
 
     /**
      * @var VersionTransformerContract
      */
-    protected static $versionTransformer;
+    protected $versionTransformer;
 
-    private $rawColumns;
-    private $columnNames;
+    protected $rawColumns;
+    protected $columnNames;
 
-    private $total = 0;
-    private $filtered = 0;
+    protected $total = 0;
+    protected $filtered = 0;
 
-    private $rows = [];
+    protected $rows = [];
 
     /**
      * @param Builder|Model $builder
      * @param array $columns
-     * @param null|callable $formatRowFunction
+     * @param null|callable $rowFormatter
      * @throws Exception
      */
-    public function __construct($builder, $columns, $formatRowFunction = null)
+    public function __construct(Connection $connection, $builder, ParameterBag $param, Str $str)
     {
+        $this->str          = $str;
+        $this->param        = $param;
+        $this->connection   = $connection;
         $this->setBuilder($builder);
-        $this->setColumns($columns);
-
-        if ($formatRowFunction !== null) {
-            $this->setFormatRowFunction($formatRowFunction);
-        }
     }
 
     /**
@@ -51,7 +53,7 @@ class DataTable
      */
     public function setBuilder($builder)
     {
-        if ( ! ($builder instanceof Builder || $builder instanceof Model)) {
+        if (!($builder instanceof Builder || $builder instanceof Model)) {
             throw new Exception('$builder variable is not an instance of Builder or Model.');
         }
 
@@ -73,9 +75,9 @@ class DataTable
      * @param callable $function
      * @return $this
      */
-    public function setFormatRowFunction($function)
+    public function setRowFormatter($function)
     {
-        $this->formatRowFunction = $function;
+        $this->rowFormatter = $function;
         return $this;
     }
 
@@ -85,7 +87,7 @@ class DataTable
      */
     public function setVersionTransformer(VersionTransformerContract $versionTransformer)
     {
-        static::$versionTransformer = $versionTransformer;
+        $this->versionTransformer = $versionTransformer;
         return $this;
     }
 
@@ -101,8 +103,8 @@ class DataTable
         $this->rawColumns = $this->getRawColumns($this->columns);
         $this->columnNames = $this->getColumnNames();
 
-        if (static::$versionTransformer === null) {
-            static::$versionTransformer = new Version110Transformer();
+        if ($this->versionTransformer === null) {
+            $this->versionTransformer = new Version110Transformer();
         }
 
         $this->addSelect();
@@ -120,13 +122,13 @@ class DataTable
             $rows[] = $this->formatRow($row);
         }
 
+        $drawKey = $this->versionTransformer->transform('draw');
+
         return [
-            static::$versionTransformer->transform('draw') => (isset($_POST[static::$versionTransformer->transform(
-                    'draw'
-                )]) ? (int)$_POST[static::$versionTransformer->transform('draw')] : 0),
-            static::$versionTransformer->transform('recordsTotal') => $this->total,
-            static::$versionTransformer->transform('recordsFiltered') => $this->filtered,
-            static::$versionTransformer->transform('data') => $rows
+            $this->versionTransformer->transform('draw') => $this->param->get($drawKey, 0),
+            $this->versionTransformer->transform('recordsTotal') => $this->total,
+            $this->versionTransformer->transform('recordsFiltered') => $this->filtered,
+            $this->versionTransformer->transform('data') => $rows
         ];
     }
 
@@ -134,11 +136,11 @@ class DataTable
      * @param $data
      * @return array|mixed
      */
-    private function formatRow($data)
+    protected function formatRow($data)
     {
         // if we have a custom format row function we trigger it instead of the default handling.
-        if ($this->formatRowFunction !== null) {
-            $function = $this->formatRowFunction;
+        if ($this->rowFormatter !== null) {
+            $function = $this->rowFormatter;
 
             return call_user_func($function, $data);
         }
@@ -158,10 +160,10 @@ class DataTable
      * @param $data
      * @return mixed
      */
-    private function formatRowIndexes($data)
+    protected function formatRowIndexes($data)
     {
         if (isset($data['id'])) {
-            $data[static::$versionTransformer->transform('DT_RowId')] = $data['id'];
+            $data[$this->versionTransformer->transform('DT_RowId')] = $data['id'];
         }
         return $data;
     }
@@ -169,7 +171,7 @@ class DataTable
     /**
      * @return array
      */
-    private function getColumnNames()
+    protected function getColumnNames()
     {
         $names = [];
         foreach ($this->columns as $index => $column) {
@@ -191,7 +193,7 @@ class DataTable
      * @param $columns
      * @return array
      */
-    private function getRawColumns($columns)
+    protected function getRawColumns($columns)
     {
         $rawColumns = [];
         foreach ($columns as $column) {
@@ -204,7 +206,7 @@ class DataTable
      * @param $column
      * @return raw|string
      */
-    private function getRawColumnQuery($column)
+    protected function getRawColumnQuery($column)
     {
         if ($column instanceof ExpressionWithName) {
             return $column->getExpression();
@@ -217,26 +219,26 @@ class DataTable
             return 'CONCAT(' . implode(', " ", ', $this->getRawColumns($column)) . ')';
         }
 
-        return Model::resolveConnection()->getQueryGrammar()->wrap($column);
+        return $this->connection->getQueryGrammar()->wrap($column);
     }
 
     /**
      * @return string
      */
-    private function getDatabaseDriver()
+    protected function getDatabaseDriver()
     {
-        return Model::resolveConnection()->getDriverName();
+        return $this->connection->getDriverName();
     }
 
     /**
      *
      */
-    private function addSelect()
+    protected function addSelect()
     {
         $rawSelect = [];
         foreach ($this->columns as $index => $column) {
             if (isset($this->rawColumns[$index])) {
-                $rawSelect[] = $this->rawColumns[$index] . ' as ' . Model::resolveConnection()->getQueryGrammar()->wrap($this->columnNames[$index]);
+                $rawSelect[] = $this->rawColumns[$index] . ' as ' . $this->connection->getQueryGrammar()->wrap($this->columnNames[$index]);
             }
         }
         $this->builder = $this->builder->select(new raw(implode(', ', $rawSelect)));
@@ -247,7 +249,7 @@ class DataTable
      * @param bool|false $inForeach
      * @return array|string
      */
-    private function arrayToCamelcase($array, $inForeach = false)
+    protected function arrayToCamelcase($array, $inForeach = false)
     {
         $result = [];
         foreach ($array as $value) {
@@ -259,16 +261,16 @@ class DataTable
             $result[] = $value;
         }
 
-        return (! $inForeach ? camel_case(implode('_', $result)) : $result);
+        return $inForeach ? $result : $this->str-camel(implode('_', $result));
     }
 
     /**
      * Add the filters based on the search value given.
      * @return $this
      */
-    private function addFilters()
+    protected function addFilters()
     {
-        $search = static::$versionTransformer->getSearchValue();
+        $search = $this->versionTransformer->getSearchValue();
         if ($search != '') {
             $this->addAllFilter($search);
         }
@@ -280,7 +282,7 @@ class DataTable
      * Searches in all the columns.
      * @param $search
      */
-    private function addAllFilter($search)
+    protected function addAllFilter($search)
     {
         $this->builder = $this->builder->where(
             function ($query) use ($search) {
@@ -298,14 +300,14 @@ class DataTable
     /**
      * Add column specific filters.
      */
-    private function addColumnFilters()
+    protected function addColumnFilters()
     {
         foreach ($this->columns as $i => $column) {
-            if (static::$versionTransformer->isColumnSearched($i)) {
+            if ($this->versionTransformer->isColumnSearched($i)) {
                 $this->builder->where(
                     new raw($this->getRawColumnQuery($column)),
                     'like',
-                    '%' . static::$versionTransformer->getColumnSearchValue($i) . '%'
+                    '%' . $this->versionTransformer->getColumnSearchValue($i) . '%'
                 );
             }
         }
@@ -316,8 +318,8 @@ class DataTable
      */
     protected function addOrderBy()
     {
-        if (static::$versionTransformer->isOrdered()) {
-            foreach (static::$versionTransformer->getOrderedColumns() as $index => $direction) {
+        if ($this->versionTransformer->isOrdered()) {
+            foreach ($this->versionTransformer->getOrderedColumns() as $index => $direction) {
                 if (isset($this->columnNames[$index])) {
                     $this->builder->orderBy(
                         $this->columnNames[$index],
@@ -331,15 +333,15 @@ class DataTable
     /**
      * Adds the pagination limits to the builder
      */
-    private function addLimits()
+    protected function addLimits()
     {
-        if (isset($_POST[static::$versionTransformer->transform(
-                    'start'
-                )]) && $_POST[static::$versionTransformer->transform('length')] != '-1'
-        ) {
-            $this->builder->skip((int)$_POST[static::$versionTransformer->transform('start')])->take(
-                (int)$_POST[static::$versionTransformer->transform('length')]
-            );
+        $start  = $this->versionTransformer->transform('start');
+        $length = $this->versionTransformer->transform('length');
+
+        if ($this->param->get($start) && $this->param->get($length) != '-1') {
+            $this->builder
+                 ->skip((int) $this->param->get($start))
+                 ->take((int) $this->param->get($length));
         }
     }
 }
