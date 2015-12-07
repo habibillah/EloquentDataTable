@@ -4,7 +4,7 @@ namespace LiveControl\EloquentDataTable;
 use Exception;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Connection;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Str;
 use Illuminate\Database\Query\Expression as raw;
 use Symfony\Component\HttpFoundation\ParameterBag;
