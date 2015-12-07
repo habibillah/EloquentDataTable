@@ -14,6 +14,7 @@ use LiveControl\EloquentDataTable\VersionTransformers\VersionTransformerContract
 class DataTable
 {
     protected $str;
+    protected $param;
     protected $builder;
     protected $columns;
     protected $connection;
@@ -104,7 +105,7 @@ class DataTable
         $this->columnNames = $this->getColumnNames();
 
         if ($this->versionTransformer === null) {
-            $this->versionTransformer = new Version110Transformer();
+            $this->versionTransformer = new Version110Transformer($this->param);
         }
 
         $this->addSelect();
