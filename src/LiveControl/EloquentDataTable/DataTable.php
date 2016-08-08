@@ -336,13 +336,16 @@ class DataTable
      */
     protected function addLimits()
     {
-        $start  = $this->versionTransformer->transform('start');
-        $length = $this->versionTransformer->transform('length');
+        $startField  = $this->versionTransformer->transform('start');
+        $lengthField = $this->versionTransformer->transform('length');
 
-        if ($this->param->get($start) && $this->param->get($length) != '-1') {
+        $start  = $this->param->get($startField, 0);
+        $length = $this->param->get($lengthField, 10);
+
+        if ($length != '-1') {
             $this->builder
-                 ->skip((int) $this->param->get($start))
-                 ->take((int) $this->param->get($length));
+                 ->skip((int) $start)
+                 ->take((int) $length);
         }
     }
 }
