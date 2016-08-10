@@ -262,7 +262,7 @@ class DataTable
             $result[] = $value;
         }
 
-        return $inForeach ? $result : $this->str-camel(implode('_', $result));
+        return $inForeach ? $result : $this->str->camel(implode('_', $result));
     }
 
     /**
